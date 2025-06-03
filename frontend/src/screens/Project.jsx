@@ -1,8 +1,27 @@
-import React, { useState, useEffect, use } from 'react'
+import React, { useState, useEffect, useContext } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom';
 ////// useLocation is used to access the current location object in your React component, which contains pathname, search, hash and state part of the URL.
 ////// state – Any state that was passed via navigation (like navigate('/project', { state: {...} }))
 import axios from '../config/axios.js';
+import { initializeSocket, receiveMessage, sendMessage } from '../config/socket.js';
+import { UserContext } from '../context/user.context.jsx';
+import Markdown from 'markdown-to-jsx'; // Assuming you have a Markdown component for rendering markdown content
+import { useRef } from 'react'; 
+
+function SyntaxHighlightedCode(props) {
+    const ref = useRef(null)
+
+    React.useEffect(() => {
+        if (ref.current && props.className?.includes('lang-') && window.hljs) {
+            window.hljs.highlightElement(ref.current)
+
+            // hljs won't reprocess the element unless this attribute is removed
+            ref.current.removeAttribute('data-highlighted')
+        }
+    }, [ props.className, props.children ])
+
+    return <code {...props} ref={ref} />
+}
 
 
 const Project = () => {
@@ -14,16 +33,31 @@ const Project = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedUserId, setSelectedUserId] = useState([]);
     const [project, setProject] = useState(location.state.project);
+    const [message, setMessage] = useState('');
+    const { user } = useContext(UserContext);
 
     const [users, setUsers] = useState([]);
+    const [messages, setMessages] = useState([]);
+    const messageBox = React.createRef();
+
+
 
     useEffect(() => {
-         axios.get(`/projects/get-project/${location.state.project._id}`).then(res => {
+        initializeSocket(project._id);
+
+        receiveMessage('project-message', (data) => {
+            // console.log('New project message:', data);
+            // appendIncomingMessage(data);
+            setMessages(prevMessages => [...prevMessages, data]);
+            // appendIncomingMessage(data);
+        });
+
+        axios.get(`/projects/get-project/${location.state.project._id}`).then(res => {
 
             console.log(res.data.project)
 
             setProject(res.data.project)
-            setFileTree(res.data.project.fileTree || {})
+            // setFileTree(res.data.project.fileTree || {})
         })
 
 
@@ -63,10 +97,27 @@ const Project = () => {
 
     }
 
+    function send(){
+
+        sendMessage('project-message', {
+            message,
+            sender: user
+        });
+
+        // appendOutgoingMessage(message);
+        setMessages(prevMessages => [...prevMessages, { message, sender: user }]);
+
+        setMessage('');
+    }
+
+    function scrollToBottom(){
+        messageBox.current.scrollTop = messageBox.current.scrollHeight;
+    }
+
     return (
         <main className="h-screen w-screen flex">
-            <section className="left flex flex-col h-full min-w-96 bg-slate-300 relative">
-                <header className="flex justify-between items-center p-2 px-4 w-full bg-slate-100">
+            <section className="left relative flex flex-col h-screen min-w-96 bg-slate-300 ">
+                <header className="flex justify-between items-center p-2 px-4 w-full bg-slate-100 absolute top-0 ">
                     <button
                         className="flex gap-2"
                         onClick={() => setIsModalOpen(true)}
@@ -184,29 +235,52 @@ const Project = () => {
                 </div>
             )}
 
-                <div className="conversation-area flex-grow flex flex-col">
-                    <div className="message-box p-1 flex-grow flex flex-col gap-1">
-                        <div className="message max-w-56 flex flex-col p-2 bg-slate-50 w-fit rounded-md ">
-                            <small className="opacity-65 text-xs">example@gmail.com</small>
-                            <p className="text-sm ">Lorem ipsum dolor sit amet.</p>
-                        </div>
-                        <div className="message ml-auto max-w-56 flex flex-col p-2 bg-slate-50 w-fit rounded-md ">
-                            <small className="opacity-65 text-xs">example@gmail.com</small>
-                            <p className="text-sm ">Lorem ipsum dolor sit amet.</p>
-                        </div>
+                <div className="conversation-area pt-14 pb-10 flex-grow flex flex-col h-full relative">
+                    <div 
+                    ref={messageBox}
+                    className="message-box p-1 flex-grow flex flex-col gap-1 overflow-auto max-h-full scrollbar-hide">
+                    {messages.map((msg, index) => (
+                            // <div key={index} className={`${msg.sender._id === 'ai' ? 'max-w-80' : 'max-w-54'} ${msg.sender._id != user._id} message flex flex-col p-2 bg-slate-50 w-fit rounded-md`}>
+                            <div key={index} className={`${msg.sender._id === 'ai' ? 'max-w-80' : 'max-w-52'} ${msg.sender._id == user._id.toString() && 'ml-auto'}  message flex flex-col p-2 bg-slate-50 w-fit rounded-md`}>
+                                <small className='opacity-65 text-xs'>{msg.sender.email}</small>
+                                {/* <div className='text-sm'> */}
+                                <p className='text-sm'>
+                                    {msg.sender._id === 'ai' ? 
+
+                                        <div className='overflow-auto bg-slate-950 text-white p-2 rounded-md'>
+                                            <Markdown
+                                                children={msg.message}
+                                                options={{
+                                                    overrides:{
+                                                        code: SyntaxHighlightedCode,
+                                                    }
+                                                }}
+                                            />
+
+                                        </div>
+                                        : msg.message}
+
+                                </p>
+                            </div>
+                    ))}                    
                     </div>
 
-                    <div className="inputField w-full flex justify-between">
+                    <div className="inputField w-full flex justify-between absolute bottom-0">
                         <input
+                            value={message}
+                            onChange={(e) => setMessage(e.target.value)}
                             className="p-2 px-4 border-none outline-none bg-white flex-grow rounded-4xl m-2 mr-1 cursor-pointer hover:bg-slate-100"
                             type="text"
                             placeholder="Enter message"
                         />
-                        <button className="px-3 m-2 ml-1 rounded-full bg-black cursor-pointer text-white">
+                        <button
+                        onClick={ send }
+                        className="px-3 m-2 ml-1 rounded-full bg-black cursor-pointer text-white">
                             <i className="ri-send-plane-fill"></i>
                         </button>
                     </div>
-                </div>
+                </div> 
+
 
                 <div className={`sidePanel min-w-96 h-full flex flex-col gap-2 bg-slate-50 absolute transition-all  ${
                         isSidePanelOpen ? 'translate-x-0' : '-translate-x-full'

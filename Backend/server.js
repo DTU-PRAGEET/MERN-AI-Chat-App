@@ -3,17 +3,31 @@ import http from "http";
 import app from "./app.js";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
+import projectModel from "./models/project.model.js";
+import { generateResult } from "./services/ai.service.js";
 
 const port = process.env.PORT || 3000;
 const server = http.createServer(app);
 
 
-const io = new Server(server);
+const io = new Server(server, {
+    cors: {
+        origin: '*'
+    }
+});
 
 //// middleware for socket.io through which only authenticate user will allow to be connected to the server. 
-io.use((socket, next) => {
+io.use(async (socket, next) => {
     try{
         const token = socket.handshake.auth?.token || socket.handshake.headers.authorization?.split(' ')[1];
+        const projectId = socket.handshake.query.projectId;
+        if(mongoose.Types.ObjectId.isValid(projectId) === false) {
+            return next(new Error("Invalid ProjectId"));
+        }
+
+        socket.project = await projectModel.findById(projectId);
+
         if (!token) {
             return next(new Error("Authentication error"));
         }
@@ -24,7 +38,7 @@ io.use((socket, next) => {
         }
         socket.user = decoded; // Attach user info to the socket
         next();
-        
+
     } catch (error) {
         next(new Error("Authentication error"));
     }
@@ -32,11 +46,37 @@ io.use((socket, next) => {
 
 
 io.on('connection', socket => {
-    console.log("socketIo is connected to server");
+    socket.roomId = socket.project._id.toString();
+    // console.log("A user connected to server: ", socket.user._id);
 
-    socket.on('event', data => { /* … */ });
+    socket.join(socket.roomId);
+
+    socket.on('project-message', async (data) => {
+
+        const aiIsPresentInMessage = data.message.includes('@ai');
+        socket.broadcast.to(socket.roomId).emit('project-message', data);
+
+        if (aiIsPresentInMessage) {
+
+            const prompt = data.message.replace('@ai', '');
+            const result = await generateResult(prompt);
+                        
+            io.to(socket.roomId).emit('project-message', {
+                sender: {
+                    _id: 'ai',
+                    email: 'AI'
+                },
+                message: result,
+            });
+            return;
+        }
+
+        
+    });
+
     socket.on('disconnect', () => { 
-        console.log("socketIo is disconnected from server");
+        console.log("A user disconnected from server");
+        socket.leave(socket.roomId); 
     });
 });
 

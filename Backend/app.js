@@ -6,6 +6,7 @@ import cors from "cors"; // used to enable CORS for the application
 
 import userRoutes from "./routes/user.routes.js";
 import projectRoutes from "./routes/project.routes.js";
+import aiRoutes from "./routes/ai.routes.js";
 
 connect();
 
@@ -19,6 +20,7 @@ app.use(cookieParser());
 
 app.use('/users', userRoutes);
 app.use('/projects', projectRoutes); 
+app.use('/ai', aiRoutes);
 
 app.get("/", (req, res) =>{
     res.send('hello world ai chat bot');
